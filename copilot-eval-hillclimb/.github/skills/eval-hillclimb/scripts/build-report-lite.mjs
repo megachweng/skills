@@ -297,7 +297,12 @@ function build(flowArg) {
     const tally = Object.create(null);
     for (const reps of Object.values(rows[v])) for (const r of reps) if (typeof r.model === 'string') tally[r.model] = (tally[r.model] || 0) + 1;
     const rowModel = Object.entries(tally).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
-    header[v] = { change: change.replace(/^#+\s*/, ''), model: summary.model || rowModel, errors: countErrors(vdir) };
+    // summary.json is optional and written by the orchestrator: its description
+    // stands in for a missing change.md, and its suspicious note is surfaced.
+    const susp = typeof summary.suspicious === 'string' ? summary.suspicious
+      : summary.suspicious && typeof summary.suspicious.note === 'string' ? summary.suspicious.note : '';
+    header[v] = { change: change.replace(/^#+\s*/, '') || (typeof summary.description === 'string' ? summary.description : ''),
+      model: summary.model || rowModel, errors: countErrors(vdir), suspicious: susp };
   }
 
   // Metrics: _state.json `metrics` (or the legacy `criteria` key) wins,
@@ -425,14 +430,15 @@ const mdCell = s => oneLine(s).replace(/\|/g, '\\|');
 const clip = (s, n) => { const cps = Array.from(s); return cps.length > n ? cps.slice(0, n).join('') + '...' : s; };
 
 // _state.json.prices: { model_id: { in, out, cache_read?, cache_write? } } in
-// USD per million tokens. Exact id first, else the longest key that prefixes
-// the id at a '-' or '@' boundary (a dated snapshot of a priced alias).
+// USD per million tokens. Exact id first, else a key the id extends by a date
+// snapshot only ('-20260101', '@20260101', '-2026-01-01') - so 'gpt-x' never
+// prices 'gpt-x-mini'.
 function priceFor(prices, model) {
   if (!prices || typeof prices !== 'object' || typeof model !== 'string' || !model) return null;
   let key = Object.prototype.hasOwnProperty.call(prices, model) ? model : null;
   if (key == null)
     for (const k of Object.keys(prices))
-      if (k && model.startsWith(k) && /^[-@]/.test(model.slice(k.length)) && (key == null || k.length > key.length)) key = k;
+      if (k && model.startsWith(k) && /^[-@](\d{8}|\d{4}-\d{2}-\d{2})$/.test(model.slice(k.length))) key = k;
   const p = key == null ? null : prices[key];
   return p && typeof p === 'object' && isNum(p.in) && isNum(p.out) ? p : null;
 }
@@ -483,6 +489,16 @@ function fmtPerf(id, unit, x) {
 
 function buildStatus({ variants, rows, cases, metrics, primary, state, header, warnings }) {
   const prices = state.prices && typeof state.prices === 'object' && !Array.isArray(state.prices) ? state.prices : null;
+  // Copilot-native runner: no token usage reaches the flow, so the cost columns
+  // count subagent calls instead of dollars.
+  const copilot = state.runner === 'copilot';
+  const callsOf = (r, isErrorRow) => (isNum(r.calls) ? r.calls : 1 + (!isErrorRow && r.judge_model ? 1 : 0));
+  const runCalls = v => {
+    let n = 0;
+    for (const pid of Object.keys(rows[v])) for (const r of rows[v][pid]) n += callsOf(r, false);
+    for (const e of header[v].errors.rows) n += callsOf(e, true);
+    return n;
+  };
   const okReps = reps => reps.filter(r => r.status == null || r.status === 'ok');
   const caseMean = (reps, m) => meanOf(okReps(reps).map(r => coerceScores(r.grade)[m]).filter(isNum));
   const labelOf = m => (typeof m.label === 'string' && m.label ? m.label : m.id);
@@ -548,7 +564,7 @@ function buildStatus({ variants, rows, cases, metrics, primary, state, header, w
   for (const m of others) cols.push(labelOf(m) + (head == null ? '' : ' (test)'));
   for (const f of perf) cols.push(typeof f.label === 'string' && f.label ? f.label
     : Object.prototype.hasOwnProperty.call(PERF_LABELS, f.id) ? PERF_LABELS[f.id] : f.id);
-  cols.push('$/run', 'spend', 'not scored');
+  cols.push(copilot ? 'calls/run' : '$/run', copilot ? 'calls total' : 'spend', 'not scored');
 
   const baseVals = {};
   let spend = 0, spendOk = true;
@@ -583,14 +599,21 @@ function buildStatus({ variants, rows, cases, metrics, primary, state, header, w
       const b = baseVals[f.id];
       cells.push(fmtPerf(f.id, f.unit, x) + (vi > 0 && isNum(b) && b > 0 ? ' (' + (x / b).toFixed(1) + '×)' : ''));
     }
-    const cost = runCost(v);
-    if (cost == null) spendOk = false; else spend += cost;
-    cells.push(cost == null ? 'not measured' : fmtUsd(cost), spendOk ? fmtUsd(spend) : 'not measured');
+    if (copilot) {
+      const c = runCalls(v);
+      spend += c;
+      cells.push(c.toFixed(0), spend.toFixed(0));
+    } else {
+      const cost = runCost(v);
+      if (cost == null) spendOk = false; else spend += cost;
+      cells.push(cost == null ? 'not measured' : fmtUsd(cost), spendOk ? fmtUsd(spend) : 'not measured');
+    }
     const e = header[v].errors.total, t = cases.reduce((s, c) => s + c.per[v].truncated, 0);
     cells.push(e || t ? [e ? e + ' failed' : '', t ? t + ' truncated' : ''].filter(Boolean).join(', ') : '0');
     return cells;
   });
-  if (!prices) warnings.push('no _state.json.prices - $/run and spend not measured; record the rate card (USD per million tokens) as prices: {model_id: {in, out}}');
+  if (copilot) { /* calls, not dollars - no price warnings */ }
+  else if (!prices) warnings.push('no _state.json.prices - $/run and spend not measured; record the rate card (USD per million tokens) as prices: {model_id: {in, out}}');
   else if (unpriced.size) warnings.push('no price in _state.json.prices for: ' + [...unpriced].sort().join(', ') + ' - $/run and spend not measured');
 
   const md = ['| ' + cols.map(mdCell).join(' | ') + ' |', '|' + cols.map(() => '---').join('|') + '|']
@@ -600,7 +623,10 @@ function buildStatus({ variants, rows, cases, metrics, primary, state, header, w
     ? 'No held-out split in _state.json: every number is over all cases - directional, not a held-out result.'
     : 'Headline: test split. Δ = paired per-case delta vs baseline with 95% CI; * = CI excludes 0 (outside noise). Other metrics: test mean (paired Δ, * outside noise).');
   notes.push('Means are per case over status-ok reps, then over cases; failed and truncated attempts are counted in "not scored", never in the means.');
-  notes.push('$/run prices every billed call in the pass (app + judge + failed attempts with usage) from _state.json.prices; cache reads at 0.1x input and cache writes at 1.25x input unless the price entry sets cache_read / cache_write.');
+  notes.push(copilot
+    ? 'Runner: Copilot subagents - token usage and dollars are not observable; calls/run counts the SUT and judge subagent calls recorded in the pass, failed attempts included.'
+    : '$/run prices every billed call in the pass (app + judge + failed attempts with usage) from _state.json.prices; cache reads at 0.1x input and cache writes at 1.25x input unless the price entry sets cache_read / cache_write.');
+  for (const v of variants) if (header[v].suspicious) notes.push('Suspicious - ' + v + ': ' + oneLine(header[v].suspicious));
   if (state.goal && typeof state.goal === 'object') {
     const g = state.goal;
     notes.push('Goal: ' + oneLine(g.target ?? '?') + ' (' + oneLine(g.direction ?? 'higher') + ' is better)'

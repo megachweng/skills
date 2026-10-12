@@ -1,6 +1,6 @@
 # Eval health checklist
 
-This file is loaded whenever an eval is being **built** (`build-eval.md`) or **climbed on** (`eval-hillclimb.md`), and on its own by `/eval-audit` ("is my eval any good?") - then run it against the eval and report per §6. (VS Code Copilot port of the claude-api skill's checklist; provider-neutral as written.) It has two jobs. When you are writing the eval, every item below is a construction requirement - the runner, grader, and case set you produce should satisfy it by default, not after someone flags it. When the user brings an existing eval, it is the verification pass you run before building anything on top of it. Either way, run it once more before the first full paid pass and before round 1 of a hillclimb.
+This file is loaded whenever an eval is being **built** (`build-eval.md`) or **climbed on** (`eval-hillclimb.md`), and on its own by `/eval-audit` ("is my eval any good?") - then run it against the eval and report per §6. (VS Code Copilot port of the claude-api skill's checklist; provider-neutral as written.) It has two jobs. When you are writing the eval, every item below is a construction requirement - the runner, grader, and case set you produce should satisfy it by default, not after someone flags it. When the user brings an existing eval, it is the verification pass you run before building anything on top of it. Either way, run it once more before the first full paid pass and before round 1 of a hillclimb. In a hillclimb, every output or transcript you read for this checklist must belong to a train case - or be read by the `eval-analyzer` subagent - so nothing held out reaches the session that proposes changes. With the Copilot runner (`copilot-runner.md`), the items that need token usage, a served-model check, latency or per-case wall-clock ceilings are "not measurable here": report them as such, never as passed.
 
 Before trusting an eval to tell you which model, prompt, or configuration is better, check that the eval itself is sound. A broken eval produces confident-looking numbers that point in the wrong direction, and a hillclimb over a broken eval just multiplies the misdirection: you will "improve" an artifact and ship nothing. In practice the most surprising eval results usually turn out to be bugs in the eval rather than facts about the model, so an hour of auditing up front routinely saves days of chasing phantom differences.
 
@@ -166,7 +166,7 @@ These checks concern the function that turns an output into a score - exact matc
 
 - **Partial credit and penalties don't make a degenerate policy optimal.** If penalties for trying and stumbling outweigh the reward for succeeding, "do nothing" wins.
 
-- **Handles large outputs.** The grader must not truncate, time out, or crash on the longest output a model might produce; a grader crash is `status: error`, not a model failure.
+- **Handles large outputs.** The grader must not truncate, time out, or crash on the longest output a model might produce; a grader crash is a harness error - an `errors.jsonl` row with its own failure class (`grader_error`) - not a model failure.
 
 ### When the grader is an LLM judge
 
@@ -188,7 +188,7 @@ An eval can be correct on every item above and still be useless for the decision
 
 - **The mechanism is wired.** Whatever the score is supposed to depend on - a tool, a memory store, an instruction file - disable it and confirm the score drops; enable it and confirm it engages in the transcripts. If the score barely moves either way, the eval isn't measuring the lever you plan to pull.
 
-- **The headline recomputes from raw rows.** Recompute the number you will report from per-case `grade` values yourself; don't trust an aggregate field. Mean-vs-sum and per-rep-vs-per-case mixups produce phantom breakthroughs.
+- **The headline recomputes from raw rows.** The number you report must come from per-case `grade` values (the report builder computes it that way); cross-check it once against an independent count of a few rows, and don't trust an aggregate field. Mean-vs-sum and per-rep-vs-per-case mixups produce phantom breakthroughs.
 
 ## 6. Reporting findings to the user
 

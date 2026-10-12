@@ -481,9 +481,14 @@ def build(flow_arg):
         ordered = sorted(((k, tally[k]) for k in js_keys(tally)), key=lambda kv: -kv[1])
         row_model = ordered[0][0] if ordered else ""
         sm = summary.get("model")
-        header[v] = {"change": _HEADING.sub("", change, count=1),
+        susp = summary.get("suspicious")
+        if isinstance(susp, dict):
+            susp = susp.get("note")
+        desc = summary.get("description")
+        header[v] = {"change": _HEADING.sub("", change, count=1) or (desc if isinstance(desc, str) else ""),
                      "model": sm if js_truthy(sm) else row_model,
-                     "errors": count_errors(vdir)}
+                     "errors": count_errors(vdir),
+                     "suspicious": susp if isinstance(susp, str) else ""}
 
     metrics_cfg = state.get("metrics") if js_truthy(state.get("metrics")) else state.get("criteria")
     declared = []
@@ -625,7 +630,7 @@ def price_for(prices, model):
     key = model if model in prices else None
     if key is None:
         for k in js_keys(prices):
-            if k and model.startswith(k) and re.match(r"[-@]", model[len(k):]) and (key is None or len(k) > len(key)):
+            if k and model.startswith(k) and re.fullmatch(r"[-@](\d{8}|\d{4}-\d{2}-\d{2})", model[len(k):], re.ASCII):
                 key = k
     p = None if key is None else prices[key]
     return p if isinstance(p, dict) and is_num(p.get("in")) and is_num(p.get("out")) else None
@@ -707,6 +712,21 @@ def fmt_perf(fid, unit, x):
 
 def build_status(variants, rows, cases, metrics, primary, state, header, warnings):
     prices = state.get("prices") if isinstance(state.get("prices"), dict) else None
+    copilot = state.get("runner") == "copilot"
+
+    def calls_of(r, is_error_row):
+        if is_num(r.get("calls")):
+            return num(r["calls"])
+        return 1.0 + (1.0 if not is_error_row and js_truthy(r.get("judge_model")) else 0.0)
+
+    def run_calls(v):
+        n = 0.0
+        for pid in js_keys(rows[v]):
+            for r in rows[v][pid]:
+                n += calls_of(r, False)
+        for e in header[v]["errors"]["rows"]:
+            n += calls_of(e, True)
+        return n
 
     def label_of(m):
         lab = m.get("label")
@@ -801,7 +821,7 @@ def build_status(variants, rows, cases, metrics, primary, state, header, warning
     for f in perf:
         lab = f.get("label")
         cols.append(lab if isinstance(lab, str) and lab else PERF_LABELS.get(f["id"], f["id"]))
-    cols += ["$/run", "spend", "not scored"]
+    cols += ["calls/run" if copilot else "$/run", "calls total" if copilot else "spend", "not scored"]
 
     base_vals = {}
     spend, spend_ok = 0.0, True
@@ -850,18 +870,25 @@ def build_status(variants, rows, cases, metrics, primary, state, header, warning
             b = base_vals.get(f["id"])
             ratio = " (" + js_fixed(x / b, 1) + "\u00d7)" if vi > 0 and b is not None and b > 0 else ""
             cells.append(fmt_perf(f["id"], f.get("unit"), x) + ratio)
-        cost = run_cost(v)
-        if cost is None:
-            spend_ok = False
+        if copilot:
+            c = run_calls(v)
+            spend += c
+            cells += [js_fixed(c, 0), js_fixed(spend, 0)]
         else:
-            spend += cost
-        cells += ["not measured" if cost is None else fmt_usd(cost), fmt_usd(spend) if spend_ok else "not measured"]
+            cost = run_cost(v)
+            if cost is None:
+                spend_ok = False
+            else:
+                spend += cost
+            cells += ["not measured" if cost is None else fmt_usd(cost), fmt_usd(spend) if spend_ok else "not measured"]
         e = header[v]["errors"]["total"]
         t = sum(c["per"][v]["truncated"] for c in cases)
         cells.append(", ".join(x for x in [str(e) + " failed" if e else "", str(t) + " truncated" if t else ""] if x)
                      if e or t else "0")
         body.append(cells)
-    if prices is None:
+    if copilot:
+        pass  # calls, not dollars - no price warnings
+    elif prices is None:
         warnings.append("no _state.json.prices - $/run and spend not measured; record the rate card "
                         "(USD per million tokens) as prices: {model_id: {in, out}}")
     elif unpriced:
@@ -877,9 +904,14 @@ def build_status(variants, rows, cases, metrics, primary, state, header, warning
                  "(outside noise). Other metrics: test mean (paired \u0394, * outside noise).")
     notes.append('Means are per case over status-ok reps, then over cases; failed and truncated attempts are '
                  'counted in "not scored", never in the means.')
-    notes.append("$/run prices every billed call in the pass (app + judge + failed attempts with usage) from "
+    notes.append("Runner: Copilot subagents - token usage and dollars are not observable; calls/run counts the SUT and "
+                 "judge subagent calls recorded in the pass, failed attempts included." if copilot else
+                 "$/run prices every billed call in the pass (app + judge + failed attempts with usage) from "
                  "_state.json.prices; cache reads at 0.1x input and cache writes at 1.25x input unless the price "
                  "entry sets cache_read / cache_write.")
+    for v in variants:
+        if header[v]["suspicious"]:
+            notes.append("Suspicious - " + v + ": " + one_line(header[v]["suspicious"]))
     g = state.get("goal")
     if js_truthy(g) and _is_obj(g):
         g = g if isinstance(g, dict) else {}

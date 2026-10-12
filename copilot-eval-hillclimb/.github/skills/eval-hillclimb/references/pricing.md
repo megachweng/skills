@@ -1,5 +1,7 @@
 # Pricing the runs
 
+> With the Copilot runner (`copilot-runner.md`) nothing here applies: Copilot exposes no token usage, so the status table counts subagent calls instead of dollars. This file is for the script runner.
+
 The report builder prices every row from `_state.json.prices`. The runner never computes cost, and you never compute it by hand. Each entry is in **USD per million tokens**:
 
 ```json
@@ -10,7 +12,7 @@ The report builder prices every row from `_state.json.prices`. The runner never 
 }
 ```
 
-- **Model ids.** Key by the id the **response** reports, since that is what each row's `model` holds. A key also prices dated snapshots of itself: `claude-opus-5-5` matches `claude-opus-5-5-20260101`.
+- **Model ids.** Key by the id the **response** reports, since that is what each row's `model` holds. A key also prices dated snapshots of itself (`claude-opus-5-5` matches `claude-opus-5-5-20260101`), but nothing else: `gpt-x` does not price `gpt-x-mini`.
 - **Cache defaults.** `cache_read` defaults to 0.1 × `in` and `cache_write` to 1.25 × `in`. Those are Anthropic's rates for the default 5-minute cache. A 1-hour cache write is 2 × `in`; set `cache_write` explicitly if the app uses it. For any other provider, set both explicitly.
 - **Judge models.** Price them too: `judge_model` × `judge_usage` is part of every `$/run`.
 - **Missing prices.** A model with no entry turns `$/run` into "not measured", and the builder's warning names the model. Add the rate rather than guessing.

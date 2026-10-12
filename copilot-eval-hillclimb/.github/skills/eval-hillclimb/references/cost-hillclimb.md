@@ -9,7 +9,12 @@
 > names under `shared/` belong to the full claude-api skill and are not bundled here: if it is
 > installed, use them; otherwise use the provider's own documentation for prompt caching,
 > prompt cleanup, and model migration. `$/run` and `spend` come from `trajectory/status.md`
-> (priced from `_state.json.prices`), so every cell in the walk is costed the same way.
+> (priced from `_state.json.prices`), so every cell in the walk is costed the same way. Where this
+> guide reads transcripts (the round-0 diagnostic, the engagement census), take output-token share
+> and turn counts from the status table's perf columns, or have the `eval-analyzer` subagent read
+> **train** transcripts only. With the Copilot runner (`copilot-runner.md`) there are no tokens or
+> dollars at all: the cost axis is the model tier (and calls per request), and most of this guide's
+> token mechanics cannot be observed - say so before planning a cost search there.
 
 Guidance for running an eval-driven search whose central goal is **reducing cost** (at
 equal-or-better quality) for a Claude-powered app - typically during a migration from an
