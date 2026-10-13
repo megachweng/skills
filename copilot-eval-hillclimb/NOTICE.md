@@ -23,4 +23,4 @@ This directory is a derivative work of the `claude-api` skill in Anthropic's ski
 - `references/vscode-copilot.md`.
 - `references/copilot-runner.md`, `references/templates/eval-sut.agent.md`, `scripts/copilot_eval.py`, `.github/agents/eval-case-worker.agent.md`, `.github/agents/eval-judge.agent.md`: the Copilot runner (system under test and judge as Copilot subagents).
 - `scripts/vscode_settings.py`: generates the VS Code settings and anchored auto-approve rules.
-- The `SKILL.md` files, `.github/agents/eval-analyzer.agent.md`, `tests/run_tests.py`, `README.md`.
+- The `SKILL.md` files, `.github/agents/eval-analyzer.agent.md`, `tests/run_tests.py`, `README.md`, `DEVELOPMENT.md`.
